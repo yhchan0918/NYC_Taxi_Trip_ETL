@@ -1,9 +1,8 @@
 from fastapi import FastAPI
 import datetime
-from etl import initialize, query_aggregated_trips_data
+from etl import initialize_database, query_aggregated_trips_data
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
-import pandas as pd
 from constants import *
 
 
@@ -13,7 +12,7 @@ class InputData(BaseModel):
 
 app = FastAPI()
 
-initialize()
+initialize_database()
 
 
 @app.post("/trips")

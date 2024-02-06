@@ -49,7 +49,7 @@ def check_table_exists(cur, table_name):
     return bool(result[0][0])
 
 
-def initialize():
+def initialize_database():
     # Connect with postgressql
     logger.info("Starting Initialization")
     conn = build_connection()
@@ -82,25 +82,17 @@ def initialize():
                 TOTAL_AMOUNT FLOAT, 
                 CONGESTION_SURCHARGE FLOAT,
                 airport_fee TEXT,
-                formatted_pickup_date TEXT,
-                hour INTEGER,
                 year_month TEXT,
                 processed_time TIMESTAMP NOT NULL 
             );
 
             CREATE TABLE IF NOT EXISTS {} (
                 year_month TEXT,
-                PULocationID TEXT,
-                DOLocationID TEXT,
+                PULocationID INTEGER,
+                DOLocationID INTEGER,
                 trip_count_array INTEGER[][],
-                avg_amount_array INTEGER[][]
+                avg_amount_array FLOAT[][]
             );
-
-            CREATE TABLE IF NOT EXISTS your_table (
-                id INTEGER[],
-                array_column INTEGER[][]
-            )
-
         """
         ).format(
             sql.Identifier(TRIPS_TABLE_NAME),
@@ -138,10 +130,10 @@ def has_exceeded_database_limit(cur):
                     COUNT(DISTINCT year_month)
                 FROM {}
             """
-        ).format(sql.Identifier(TRIPS_TABLE_NAME))
+        ).format(sql.Identifier(AGGREGATED_TRIPS_TABLE_NAME))
     )
     number_of_months = cur.fetchall()[0][0]
-    logger.info(f"Number of year_month: {number_of_months}")
+    logger.info(f"Number of unique year_month: {number_of_months}")
     return number_of_months == DATABASE_LIMIT
 
 
@@ -218,13 +210,17 @@ def build_long_array_metrics(row, metric_col):
         day_arr = []
         if day in row["day"]:
             for hour in range(24):
-                trip_count = 0
-                if i < metrics_length and row["hour"][i] == hour:
-                    trip_count = row["trip_count"][i]
+                hourly_metric = 0
+                if (
+                    i < metrics_length
+                    and row["hour"][i] == hour
+                    and row["day"][i] == day
+                ):
+                    hourly_metric = row[metric_col][i]
                     i += 1
-                day_arr.append(str(trip_count))
+                day_arr.append(str(hourly_metric))
         else:
-            day_arr = ["0" for i in range(24)]
+            day_arr = ["0" for _ in range(24)]
         monthly_arr.append("{" + ",".join(day_arr) + "}")
     if i != metrics_length:
         print("hailat")
@@ -241,26 +237,21 @@ def run_etl(date, cur):
     filename = f"yellow_tripdata_{formatted_year_month}.parquet"
     dataset_url = build_url(filename)
     # Read file from website
-    # TODO: remove .iloc[:5]
-    df = pd.read_parquet(dataset_url, engine="pyarrow").iloc[:5].fillna(0)
+    df = pd.read_parquet(dataset_url, engine="pyarrow").fillna(0)
+
     # Need to handle data validation
-    if not ("PULocationID" in df.columns and "DOLocationID" in df.columns):
+    if "PULocationID" not in df.columns or "DOLocationID" not in df.columns:
         raise Exception("No location data")
 
     df = df[
         (df[PICKUP_DATETIME_COL] >= start_date) & (df[PICKUP_DATETIME_COL] < end_date)
     ]
-    df["formatted_pickup_date"] = df[PICKUP_DATETIME_COL].dt.strftime("%Y-%m-%d")
+    df["year_month"] = formatted_year_month
     df["hour"] = df[PICKUP_DATETIME_COL].dt.hour
     df["day"] = df[PICKUP_DATETIME_COL].dt.day
     df["processed_time"] = datetime.datetime.now()
 
-    # Import fact data
-    logger.info(f"Start Copying {len(df)} rows to {TRIPS_TABLE_NAME}...")
-    import_data(df, cur, TRIPS_TABLE_NAME)
-    logger.info("Done Copying...")
-
-    # Import aggregated data
+    # Aggregate data
     agg_df = (
         df.groupby(["day", "hour", "PULocationID", "DOLocationID"]).agg(
             trip_count=(PICKUP_DATETIME_COL, "count"),
@@ -282,11 +273,18 @@ def run_etl(date, cur):
             lambda row: build_long_array_metrics(row, "trip_count"), axis=1
         ),
         "avg_amount_array": grouped_agg_df.apply(
-            lambda row: build_long_array_metrics(row, "trip_count"), axis=1
+            lambda row: build_long_array_metrics(row, "avg_amount"), axis=1
         ),
     }
     aggregated_trips_df = pd.DataFrame(raw_data)
 
+    # Import fact data
+    df = df.drop(columns=["hour", "day"])
+    logger.info(f"Start Copying {len(df)} rows to {TRIPS_TABLE_NAME}...")
+    import_data(df, cur, TRIPS_TABLE_NAME)
+    logger.info("Done Copying...")
+
+    # Import aggregate data
     logger.info(
         f"Start Copying {len(aggregated_trips_df)} rows to {AGGREGATED_TRIPS_TABLE_NAME}..."
     )
@@ -300,14 +298,5 @@ def run_etl(date, cur):
     logger.info(f"Ending ETL... Time taken: {time.time() - start_time}")
 
 
-# initialize()
+# initialize_database()
 # query_aggregated_trips_data(datetime.datetime(2020, 2, 12))
-
-
-# for year in range(2015, 2022):
-#     for month in range(1, 13):
-#         try:
-#             print(query_aggregated_trips_data(datetime.datetime(year, month, 12)))
-#         except Exception as error:
-#             logger.error(f"{year}-{month}")
-#             logger.error(error)
