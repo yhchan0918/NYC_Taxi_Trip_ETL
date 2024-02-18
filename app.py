@@ -1,14 +1,10 @@
 import streamlit as st
-import datetime
 import requests
 import pandas as pd
 from constants import *
 
 
 # Utility function
-unknown_location_ids = [264, 265]
-
-
 @st.cache_resource
 def get_zone_lookup_table():
     zone_df = pd.read_csv("taxi+_zone_lookup.csv")
@@ -19,7 +15,7 @@ def get_zone_lookup_table():
     for _, row in zone_df.iterrows():
         zone_name = row["Zone"]
         location_id = row["LocationID"]
-        if zone_name and location_id not in unknown_location_ids:
+        if zone_name and location_id not in UNKNOWN_LOCATION_IDS:
             zone_name = (
                 f"{zone_name} ({str(location_id)})"
                 if location_id in duplicated_zone_id_list
@@ -28,13 +24,11 @@ def get_zone_lookup_table():
             lookup[location_id] = zone_name
             reverse_lookup[zone_name] = location_id
 
-    sorted_selections = sorted(lookup.values())
-
-    return lookup, reverse_lookup, sorted_selections
+    return lookup, reverse_lookup
 
 
 # Initialization global resources and state
-id2zone_lookup, zone2id_lookup, zone_selections = get_zone_lookup_table()
+id2zone_lookup, zone2id_lookup = get_zone_lookup_table()
 
 
 def initialize_state():
@@ -48,12 +42,10 @@ def on_change_input_date():
 
 
 def on_change_pickup_zone():
-    # st.session_state[SUBMIT_REQUEST_KEY] = False
     pass
 
 
 def on_change_dropoff_zone():
-    # st.session_state[SUBMIT_REQUEST_KEY] = False
     pass
 
 
@@ -97,7 +89,7 @@ if st.session_state[SUBMIT_REQUEST_KEY]:
         else:
 
             result = requests.post(
-                url="http://127.0.0.1:8000/trips",
+                url=API_URI,
                 json={"input_date": date.strftime(YEAR_MONTH_DAY_FORMAT)},
             )
             if result.status_code != 200:
@@ -115,8 +107,8 @@ if st.session_state[SUBMIT_REQUEST_KEY]:
             for idx in hours_arr:
                 if (
                     daily_trip_count_metrics[idx] > 0
-                    and pulocationid not in unknown_location_ids
-                    and dolocationid not in unknown_location_ids
+                    and pulocationid not in UNKNOWN_LOCATION_IDS
+                    and dolocationid not in UNKNOWN_LOCATION_IDS
                 ):
                     if pulocationid not in zone_pairs:
                         temp = set()
@@ -182,7 +174,7 @@ if st.session_state[SUBMIT_REQUEST_KEY]:
                 y="Trip Count",
             )
 
-            # Provide the cheapest hour of the day on average to take a trip
+            # Shows average total fare for each hour of that day and the cheapest hour of the day on average to take a trip
             st.subheader(f"Average Total Fare By Hour on {formatted_date}")
             avg_amount_by_hour_data = pd.DataFrame(
                 {

@@ -17,3 +17,5 @@ NO_OF_HOURS = 24
 SUBMIT_REQUEST_KEY = "submit_request"
 MIN_DATE = datetime.datetime(2011, 1, 1)
 MAX_DATE = datetime.datetime(2023, 11, 30)
+API_URI = "http://127.0.0.1:8000/trips"
+UNKNOWN_LOCATION_IDS = [264, 265]
